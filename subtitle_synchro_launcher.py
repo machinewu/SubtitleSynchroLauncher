@@ -13,16 +13,17 @@ import shlex
 import shutil
 import sys
 import threading
-import time
 import tkinter as tk
 import traceback
 from collections import OrderedDict, namedtuple
+from datetime import datetime
 from io import StringIO
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 import aiofiles
-from charset_normalizer import detect, from_bytes
+from charset_normalizer import detect
 from tkinterdnd2 import DND_FILES, TkinterDnD
+
 
 APP_TITLE = "Subtitle Synchro Launcher"
 
@@ -90,9 +91,6 @@ label_fontsize = 9
 label_tips_fontsize = 9
 label_outputdir_icon_fontsize = 10
 label_filter_icon_fontsize = 10
-button_fontsize = 10
-button_emoji_fontsize = 10
-button_execute_fontsize = 12
 listbox_fontsize = 9
 entry_fontsize = 10
 console_fontname = Microsoft YaHei
@@ -100,6 +98,9 @@ console_fontsize = 10
 context_menu_fontname = Microsoft YaHei
 context_menu_fontsize = 10
 button_emoji_fontname = Microsoft YaHei
+button_emoji_fontsize = 10
+button_execute_fontsize = 12
+button_fontsize = 10
 button_top = ⤒⤒
 button_up = ↑
 button_down = ↓
@@ -126,6 +127,8 @@ color_button_execute_font = #18a24b
 color_button_stop_font = #ff2222
 color_listbox_font = #000000
 color_listbox_bg = #ffffff
+color_odd_row_bg = #f5e6ff
+color_even_row_bg = #ffffff
 color_console_font = #000000
 color_console_error_font = #ff0000
 color_console_system_font = #0000ff
@@ -136,18 +139,17 @@ color_output_dir_entry_height_fix = 0
 color_filter_entry_font = #000000
 color_filter_entry_bg = #ffffff
 color_filter_entry_height_fix = 0
-color_odd_row_bg = #f5e6ff
-color_even_row_bg = #ffffff
 color_tips_font = #000000
 color_tips_bg = #ffffe0
 
 [i18n]
 description = A universal GUI for adjusting subtitle timelines based on video/audio
 title_profile_name = Profile:
+startup_logo = For more information, please visit https://github.com/machinewu/SubtitleSynchroLauncher
 column_number = #
 column_filename = Filename
 column_filepath = Path
-drop_mask_hits_source = Drag & drop\tSource video/audio or source subtitle (folders allowed)
+drop_mask_hits_source = Drag & drop\tSource video/audio or Source subtitle (folders allowed)
 drop_mask_hits_destination = Drag & drop\tDestination video/audio (folders allowed)
 label_source_media = Source Video/Audio
 label_source_subtitle = Source Subtitle
@@ -197,14 +199,15 @@ procedure_running_stage = Executing: stage {stage_id} ({procedure})
 procedure_stage_process_failure = Execution failed: stage {stage_id} ({procedure})
 procedure_stop = Stopped execution: stage {stage_id} ({procedure})
 procedure_detect_file_encode = Detected file encoding: {encoding}, confidence: {confidence}
-procedure_shift_src_subtitle_timeline_delay = Source audio track delayed by {} ms
-procedure_shift_dst_subtitle_timeline_delay = Destination audio track delayed by {} ms
+procedure_shift_src_subtitle_timeline_delay = Source audio track has a DELAY of {} ms
+procedure_shift_dst_subtitle_timeline_delay = Destination audio track has a DELAY of {} ms
 """
 
 SIMPLE_CHINESE_I18N_CONTENT = """
 [i18n]
 description = 一个根据视频/音频调整字幕时间轴的通用GUI
 title_profile_name = 配置文件:
+startup_logo = 想了解更多信息，请访问 https://github.com/machinewu/SubtitleSynchroLauncher
 column_number = #
 column_filename = 文件名
 column_filepath = 路径
@@ -258,8 +261,8 @@ procedure_running_stage = 正在执行: stage {stage_id} ({procedure})
 procedure_stage_process_failure = 执行失败: stage {stage_id} ({procedure})
 procedure_stop = 终止执行: stage {stage_id} ({procedure})
 procedure_detect_file_encode = 检测到文件的编码为: {encoding}  置信度: {confidence}
-procedure_shift_src_subtitle_timeline_delay = 源音轨延迟了 {} 毫秒
-procedure_shift_dst_subtitle_timeline_delay = 目标音轨延迟了 {} 毫秒
+procedure_shift_src_subtitle_timeline_delay = 源音轨带了 {} 毫秒延迟
+procedure_shift_dst_subtitle_timeline_delay = 目标音轨带了 {} 毫秒延迟
 """
 
 Message = namedtuple("Message", ["task_id", "content", "tag"])
@@ -730,6 +733,10 @@ class ProcedureManager:
         self.shell_encoding = locale.getpreferredencoding()
         self.processes = set()
 
+        self.env["PYTHONIOENCODING"] = "utf-8"
+        self.env["LANG"] = "en_US.UTF-8"
+        self.env["LC_ALL"] = "en_US.UTF-8"
+
     def add_path_to_env(self, path):
         separator = ";" if sys.platform.startswith("win") else ":"
         dir_path = path if os.path.isdir(path) else os.path.dirname(path)
@@ -746,13 +753,13 @@ class ProcedureManager:
 
     def _decode_subprocess_output(self, text):
         try:
-            return text.decode(self.shell_encoding)
+            return text.decode()
         except BaseException:
             try:
-                return str(from_bytes(text).best())
+                return text.decode(self.shell_encoding)
             except BaseException:
                 pass
-        return text.decode("raw_unicode_escape")
+        return text.decode("raw_unicode_escape", errors="replace")
 
     async def execute_command(self, task_id, cmd):
         content = None
@@ -1026,10 +1033,8 @@ class TaskManager:
                 default_vars_map = self.ReplaceSafeDict(
                     {
                         "output_dir": output_dir,
-                        "temp_dir": os.path.join(
-                            output_dir, f'_tmp{time.strftime("%y%m%d%H%M%S", time.localtime())}-{task_id}'
-                        ),
                         "task_id": task_id,
+                        "temp_dir": os.path.join(output_dir, f"_tmp{datetime.now():%y%m%d%H%M%S}-{task_id}"),
                     }
                 )
                 for k, path in {
@@ -1101,7 +1106,7 @@ class TaskManager:
                         )
 
                     output_key = stage.get("output_key", None)
-                    if output_key:
+                    if output_key and output_key not in default_vars_map and not output_key.endswith("_exe"):
                         vars_map[output_key] = content
 
                     output_file = stage.get("output_file", None)
@@ -1226,6 +1231,8 @@ class Application(TkinterDnD.Tk):
 
         self._style_setting()
         self._create_widgets()
+        self.scroll_console.insert(tk.END, "𝕊𝕦𝕓𝕥𝕚𝕥𝕝𝕖 𝕊𝕪𝕟𝕔𝕙𝕣𝕠 𝕃𝕒𝕦𝕟𝕔𝕙𝕖𝕣\n", "logo")
+        self.scroll_console.insert(tk.END, f"{self.i18n['startup_logo']}", "system")
 
     def _prepare_configure(self, config_file):
         ini_config = configparser.ConfigParser(
@@ -1564,6 +1571,7 @@ class Application(TkinterDnD.Tk):
             font=(self.style_cfg["console_fontname"], self.style_cfg["console_fontsize"]),
         )
         self.scroll_console.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2, pady=2)
+        self.scroll_console.tag_configure("logo", foreground="#00d999", font=("Arial", 18))
         self.scroll_console.tag_configure("normal", foreground=self.style_cfg["color_console_font"])
         self.scroll_console.tag_configure("error", foreground=self.style_cfg["color_console_error_font"])
         self.scroll_console.tag_configure("system", foreground=self.style_cfg["color_console_system_font"])
