@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -732,13 +733,19 @@ class ProcedureManager:
         self.env = os.environ.copy()
         self.shell_encoding = locale.getpreferredencoding()
         self.processes = set()
+        self.is_windows_os = sys.platform.startswith("win")
+        self.subprocess_extra_args = dict()
 
         self.env["PYTHONIOENCODING"] = "utf-8"
         self.env["LANG"] = "en_US.UTF-8"
         self.env["LC_ALL"] = "en_US.UTF-8"
 
+        if self.is_windows_os:
+            # when running with pythonw, ensure calling the command line won’t trigger a popup window
+            self.subprocess_extra_args["creationflags"] = subprocess.CREATE_NO_WINDOW
+
     def add_path_to_env(self, path):
-        separator = ";" if sys.platform.startswith("win") else ":"
+        separator = ";" if self.is_windows_os else ":"
         dir_path = path if os.path.isdir(path) else os.path.dirname(path)
         self.env["PATH"] = f"{os.path.abspath(dir_path)}{separator}{os.environ.get('PATH', '')}"
 
@@ -764,7 +771,11 @@ class ProcedureManager:
     async def execute_command(self, task_id, cmd):
         content = None
         proc = await asyncio.create_subprocess_exec(
-            *cmd, env=self.env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            *cmd,
+            env=self.env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            **self.subprocess_extra_args,
         )
         self.processes.add(proc)
         try:
@@ -788,7 +799,7 @@ class ProcedureManager:
             else:
                 content, _ = await proc.communicate()
                 content = self._decode_subprocess_output(content)
-                self.console(task_id, [x.rstrip() for x in content.split("\n")])
+                self.console(task_id, [x.rstrip() for x in content.rstrip().split("\n")])
 
             return proc.returncode == 0, content
         finally:
@@ -836,7 +847,11 @@ class ProcedureManager:
             media_file,
         ]
         proc = await asyncio.create_subprocess_exec(
-            *cmd, env=self.env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            *cmd,
+            env=self.env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            **self.subprocess_extra_args,
         )
         content, _ = await proc.communicate()
 
@@ -876,7 +891,11 @@ class ProcedureManager:
             media_file,
         ]
         proc = await asyncio.create_subprocess_exec(
-            *cmd, env=self.env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            *cmd,
+            env=self.env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            **self.subprocess_extra_args,
         )
         content, _ = await proc.communicate()
 
@@ -1240,6 +1259,7 @@ class Application(TkinterDnD.Tk):
         )
         # load the default configuration first
         ini_config.read_file(StringIO(DEFAULT_CONFIG_CONTENT))
+
         lang = locale.getlocale()[0]
         if not lang:
             try:
