@@ -32,6 +32,7 @@ Subtitle Synchro Launcher is a universal GUI launcher designed for convenient su
 - With concurrency set to 1, logs are output in real time. With higher concurrency, logs for each command are output after completion to prevent interleaving.
 - The output directory field automatically expands to an absolute path. Entering `.` means the program's startup directory.
 - Most UI elements have tooltips; hover your mouse for more information.
+- Specifically, if there is only one source video/audio and one source subtitle, but multiple target videos/audios, you’ll be prompted that the input entries will be duplicated to match the quantity of target videos/audios. (This is convenient for timing adjustments for video OPs and EDs.)
 
 
 ## Configuration File Guide
