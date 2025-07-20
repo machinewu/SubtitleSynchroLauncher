@@ -1,0 +1,3 @@
+aiofiles
+charset_normalizer
+tkinterdnd2
