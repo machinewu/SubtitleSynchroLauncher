@@ -1,41 +1,45 @@
 # Subtitle Synchro Launcher
+
 [-->中文文档<--](./README_CN.md)
+
 Subtitle Synchro Launcher is a universal GUI launcher designed for convenient subtitle synchronization. It allows users to add source video/audio, source subtitles, and destination video/audio files via simple drag-and-drop, then calls external subtitle synchronization tools to align subtitle timing. Basic pre- and post-processing of subtitles is also supported.
 
--   Supports various command-line subtitle synchronization tools ([Sushi](https://github.com/FichteFoll/Sushi), [alass](https://github.com/kaegi/alass), [FFsubsync](https://github.com/smacke/ffsubsync), etc.), with customizable parameters.
--   Supports concurrent processing of multiple tasks and allows stopping tasks during runtime.
--   Supports adding files/folders via drag-and-drop.
--   Allows reordering and sorting of file lists, including correct alphanumeric sorting for filenames with unaligned numbers (e.g., `a8.mkv, a9.mkv, a10.mkv, a11.mkv`).
--   Customizable UI styles.
--   Multi-language support.
+- Supports various command-line subtitle synchronization tools ([Sushi](https://github.com/FichteFoll/Sushi), [alass](https://github.com/kaegi/alass), [FFsubsync](https://github.com/smacke/ffsubsync), etc.), with customizable parameters.
+- Supports concurrent processing of multiple tasks and allows stopping tasks during runtime.
+- Supports adding files/folders via drag-and-drop.
+- Allows reordering and sorting of file lists, including correct alphanumeric sorting for filenames with unaligned numbers (e.g., `a8.mkv, a9.mkv, a10.mkv, a11.mkv`).
+- Customizable UI styles.
+- Multi-language support.
 
 ![operation_en](https://github.com/user-attachments/assets/a6cadf68-cf7b-45b9-987b-c2c7636f053a)
 ![snapshot_en](https://github.com/user-attachments/assets/2ab438a8-0dd3-4a12-9187-17881ddbcc33)
 
 ### Usage
 
-1.  Add source video/audio, source subtitles, and destination video/audio files by **dragging and dropping** or clicking the "➕" button. Dragging and dropping can involve folders. Source video/audio and subtitles can be dragged in together and will be assigned to the corresponding listboxes automatically. The button only supports adding files, not folders.
-2.  If the output directory is left blank, it will be set automatically based on the destination video/audio input. You can modify it as needed.
-3.  Check whether the line numbers of the files in the listbox correspond correctly row by row. You can sort, delete, or filter as needed.
-4.  Click the "Run" button to start synchronization tasks. Progress and logs will be shown in the console.
-5.  To terminate a task during runtime, click the "Stop" button (visible only during execution).
+1. Add source video/audio, source subtitles, and destination video/audio files by **dragging and dropping** or clicking the "➕" button. Dragging and dropping can involve folders. Source video/audio and subtitles can be dragged in together and will be assigned to the corresponding listboxes automatically. The button only supports adding files, not folders.
+2. If the output directory is left blank, it will be set automatically based on the destination video/audio input. You can modify it as needed.
+3. Check whether the line numbers of the files in the listbox correspond correctly row by row. You can sort, delete, or filter as needed.
+4. Click the "Run" button to start synchronization tasks. Progress and logs will be shown in the console.
+5. To terminate a task during runtime, click the "Stop" button (visible only during execution).
 
 #### Notes:
 
--   Python 3.10+ is recommended. While Python 3.8+ is supported, some UI features may be missing in these lower versions (e.g., listbox background striping).
--   Required Python modules: `aiofiles`, `charset_normalizer`, `tkinterdnd2`. You can install with `pip install -r requirements.txt` or `pip install aiofiles charset_normalizer tkinterdnd2`.
--   You can specify a custom config file path as a parameter when launching Subtitle Synchro Launcher (on Windows, add it to the shortcut Target). If no parameter is given, placing `config.ini` in the program directory will load it automatically. If loaded successfully, the profile name will appear in the program title.
--   By default, Sushi is configured for synchronization, requiring `ffmpeg`, `ffprobe`, and `sushi` to be available in your system PATH. If not, specify their paths in `config.ini`.
--   Restart the program after modifying the config file for changes to take effect.
--   With concurrency set to 1, logs are output in real time. With higher concurrency, logs for each command are output after completion to prevent interleaving.
--   The output directory field automatically expands to an absolute path. Entering `.` means the program's startup directory.
--   Most UI elements have tooltips; hover your mouse for more information.
+- Python 3.10+ is recommended. While Python 3.8+ is supported, some UI features may be missing in these lower versions (e.g., listbox background striping).
+- Required Python modules: `aiofiles`, `charset_normalizer`, `tkinterdnd2`. You can install with `pip install -r requirements.txt` or `pip install aiofiles charset_normalizer tkinterdnd2`.
+- You can specify a custom config file path as a parameter when launching Subtitle Synchro Launcher (on Windows, add it to the shortcut Target). If no parameter is given, placing `config.ini` in the program directory will load it automatically. If loaded successfully, the profile name will appear in the program title.
+- By default, Sushi is configured for synchronization, requiring `ffmpeg`, `ffprobe`, and `sushi` to be available in your system PATH. If not, specify their paths in `config.ini`.
+- Restart the program after modifying the config file for changes to take effect.
+- With concurrency set to 1, logs are output in real time. With higher concurrency, logs for each command are output after completion to prevent interleaving.
+- The output directory field automatically expands to an absolute path. Entering `.` means the program's startup directory.
+- Most UI elements have tooltips; hover your mouse for more information.
 
 
 ## Configuration File Guide
-**Note**: The config file does not support direct line breaks. Use the tab character "	" (the Tab key \t, but \t cannot be written explicitly) to indicate a line break.
-The configuration file must be encoded in UTF-8.
-A line can be commented out by starting it with # or ; (inline comments are not supported).
+
+**Note**: 
+- The config file does not support direct line breaks. Use the tab character "	" (the Tab key \t, but \t cannot be written explicitly) to indicate a line break.
+- The configuration file must be encoded in UTF-8.
+- A line can be commented out by starting it with # or ; (inline comments are not supported).
 
 ### 1\. General Configuration [general]
 
@@ -123,7 +127,9 @@ The program includes built-in i18n configurations for English and Simplified Chi
 ### 4\. Variable Configuration [variable]
 
 *Before each task runs*, variables in the form *`{XXX}` are replaced line by line*. If a variable is not found, an error will occur. Variables defined in subsequent lines can use variables defined in previous lines.
+
 Some variables are reserved and cannot be overwritten, especially those ending with `_exe`. Other variables can be updated by the output of each stage, and subsequent stages will use the updated values.
+
 **Note**: Variables ending with `_exe` (e.g., `XXX_exe`) will **NOT be replaced** (i.e., if its value contains `{YYY}`, `{YYY}` will not be replaced with the corresponding value). If its value is a path, the *directory where the path is located* will be added to the front of the `PATH` environment variable during task execution.
 
 |       Option        |                                                                                                                         Description                                                                                                                         |                                        Default Value                                        |
@@ -151,7 +157,9 @@ Some variables are reserved and cannot be overwritten, especially those ending w
 ### 5\. Stage Configuration [stage_*]
 
 This section can be named `stage_*`, where `*` is a `code` referenced by `task_stages` in `[general]`. For example, if you define `stage_aa`, `stage_bc`, and `stage_7`, you can set `task_stages = bc, aa` in `[general]`. You can define extra stages without using them.
+
 Typically, each task consists of several commands, each defined as a stage.
+
 The default configuration includes seven stages: `stage_0`、`stage_1`、`stage_2`、`stage_3`、`stage_4`、`stage_5`、`stage_6`. Users can override these, but it is not recommended. If you need a new stage, use a new `code` and leave the defaults unused.
 
 Each stage can be configured with the following options:
@@ -163,18 +171,20 @@ Each stage can be configured with the following options:
 | output_key  | Store the output string in the specified variable (no need to predefine in `[variable]`). Generally, this value does not include `{}`. If `{}` is used, the output will be stored in the variable whose name is the value of the variable inside the braces. For example, if you define a variable `aa=bbb` in `[variable]`, then specifying `{aa}` here will store the output string in the variable named `bbb`, not in `aa`. |
 | output_file | Store the output string in the specified file path. Can be used together with `output_key`. If both are omitted, no output is stored.                                                                                                                                                                                                                                                                                           |
 
-Procedure definitions:
+#### Procedure definitions:
 
-|                 Procedure                 |                                                                                                                                                                                                          Description                                                                                                                                                                                                          |                                                                    Input                                                                     |                                                                                               Output                                                                                                |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| convert_file_to_utf8                      | Convert a file to UTF-8 encoding.                                                                                                                                                                                                                                                                                                                                                                                             | File path (usually a subtitle file)                                                                                                          | UTF-8 string of the converted file content                                                                                                                                                          |
-| get_audio_stream_idx                      | Get the index of the first audio track.                                                                                                                                                                                                                                                                                                                                                                                       | File path (usually a video/audio file)                                                                                                       | Audio track index                                                                                                                                                                                   |
-| execute_command                           | Execute a system command. If the command returns a non-zero exit code, the stage is considered failed.                                                                                                                                                                                                                                                                                                                        | Command string (use double quotes for arguments with spaces; variables like `{XXX}` do not need quotes, even if their values contain spaces) | Output from the system command                                                                                                                                                                      |
-| shift_source_subtitle_timeline_delay      | Adjusts the subtitle start time from "matching the video playback start time (which may differ from the video track's start time)" to "matching the start time of the specified audio track." If the input is an audio file instead of a video, the delay is determined from the audio filename (as MKVExtractGUI typically includes the delay in the exported filename). Typically used as a pre-processing step for Sushi.  | Three parameters: `video/audio`, `index number of the audio track`, `subtitle file (any encoding, not just UTF-8)`                           | UTF-8 string of the adjusted subtitle file content (**Note**: This method outputs the content of the subtitle file as a UTF-8 string, so you do not need to use `convert_file_to_utf8` separately.) |
-| shift_destination_subtitle_timeline_delay | Adjusts the subtitle start time from "matching the start time of the specified audio track" to "matching the video playback start time (which may differ from the video track's start time)." If the input is an audio file instead of a video, the delay is determined from the audio filename (as MKVExtractGUI typically includes the delay in the exported filename). Typically used as a post-processing step for Sushi. | Three parameters: `video/audio`, `index number of the audio track`, `subtitle file (any encoding, not just UTF-8)`                           | UTF-8 string of the adjusted subtitle file content (**Note**: This method outputs the content of the subtitle file as a UTF-8 string, so you do not need to use `convert_file_to_utf8` separately.) |
+**Note**: Procedure `shift_source_subtitle_timeline_delay` and `shift_destination_subtitle_timeline_delay` output the content of the subtitle file as a UTF-8 string, so you do not need to use `convert_file_to_utf8` separately.
 
-License
--------
+|                 Procedure                 |                                                                                                                                                                                                          Description                                                                                                                                                                                                          |                                                                    Input                                                                     |                       Output                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| convert_file_to_utf8                      | Convert a file to UTF-8 encoding.                                                                                                                                                                                                                                                                                                                                                                                             | File path (usually a subtitle file)                                                                                                          | UTF-8 string of the converted file content         |
+| get_audio_stream_idx                      | Get the index of the first audio track.                                                                                                                                                                                                                                                                                                                                                                                       | File path (usually a video/audio file)                                                                                                       | Audio track index                                  |
+| execute_command                           | Execute a system command. If the command returns a non-zero exit code, the stage is considered failed.                                                                                                                                                                                                                                                                                                                        | Command string (use double quotes for arguments with spaces; variables like `{XXX}` do not need quotes, even if their values contain spaces) | Output from the system command                     |
+| shift_source_subtitle_timeline_delay      | Adjusts the subtitle start time from "matching the video playback start time (which may differ from the video track's start time)" to "matching the start time of the specified audio track." If the input is an audio file instead of a video, the delay is determined from the audio filename (as MKVExtractGUI typically includes the delay in the exported filename). Typically used as a pre-processing step for Sushi.  | Three parameters: `video/audio`, `index number of the audio track`, `subtitle file (any encoding, not just UTF-8)`                           | UTF-8 string of the adjusted subtitle file content |
+| shift_destination_subtitle_timeline_delay | Adjusts the subtitle start time from "matching the start time of the specified audio track" to "matching the video playback start time (which may differ from the video track's start time)." If the input is an audio file instead of a video, the delay is determined from the audio filename (as MKVExtractGUI typically includes the delay in the exported filename). Typically used as a post-processing step for Sushi. | Three parameters: `video/audio`, `index number of the audio track`, `subtitle file (any encoding, not just UTF-8)`                           | UTF-8 string of the adjusted subtitle file content |
+
+## License
 
 MIT License. For details, see the [license file](https://lmarena.ai/c/LICENSE).
+
 UI layout inspired by [字幕文件批量改名](https://soft.3dmgame.com/down/286840.html).
