@@ -22,7 +22,7 @@ from io import StringIO
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 import aiofiles
-from charset_normalizer import detect
+from charset_normalizer import from_bytes
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 
@@ -49,10 +49,10 @@ task_stages = 1, 2, 3, 4, 5
 ffmpeg_exe = ffmpeg
 ffprobe_exe = ffprobe
 sushi_exe = sushi
-#src_subtitle_utf8 = {temp_dir}/{src_media_name}.stage1.{src_subtitle_suffix}
+#src_subtitle_utf8 = {temp_dir}/{src_media_name}.stage0.{src_subtitle_suffix}
 src_subtitle_utf8 = {src_subtitle}
-delay_input_subtitle = {temp_dir}/{src_media_name}.stage3.{src_subtitle_suffix}
-sushi_output_subtitle = {temp_dir}/{dst_media_name}.stage5.{src_subtitle_suffix}
+delay_input_subtitle = {temp_dir}/{src_media_name}.stage2.{src_subtitle_suffix}
+sushi_output_subtitle = {temp_dir}/{dst_media_name}.stage4.{src_subtitle_suffix}
 delay_output_subtitle = {output_dir}/{dst_media_name}.shifted.{src_subtitle_suffix}
 src_audio_idx = 1
 dst_audio_idx = 1
@@ -277,7 +277,9 @@ class ListModuleFrame(ttk.Frame):
         style_cfg = app.style_cfg
         i18n = app.i18n
         self.tips_trigger_time_ms = int(general_cfg["listbox_tips_trigger_time_ms"])
-        self.ext_filter_set = {f".{x.strip()}" for x in general_cfg[f"{accept_types}_ext"].split(",") if x.strip()}
+        self.ext_filter_set = {
+            f".{x.strip().lower()}" for x in general_cfg[f"{accept_types}_ext"].split(",") if x.strip()
+        }
         self.file_number_prefix_text = i18n["label_file_quantity"]
         self.filter_var = tk.StringVar()
 
@@ -812,27 +814,38 @@ class ProcedureManager:
         async with aiofiles.open(file_path, "rb") as f:
             data = await f.read()
 
-        for bom, encoding in [
-            (b"\xef\xbb\xbf", "utf-8-sig"),
-            (b"\xff\xfe", "utf-16le"),
-            (b"\xfe\xff", "utf-16be"),
-            (b"\xff\xfe\x00\x00", "utf-32le"),
-            (b"\x00\x00\xfe\xff", "utf-32be"),
-        ]:
-            if data.startswith(bom):
-                data = data.decode(encoding)
-                detect_result = {"encoding": encoding, "confidence": 1.0}
+        exclude_encodings = []
+        detect_result = last_detect_result = None
+        for encodings in (["utf_8", "gb18030", "big5"], ["utf_16_le", "utf_16_be", "shift_jis", "cp1252"], []):
+            # only detect first 10KB
+            detect_result = from_bytes(
+                data,
+                steps=10,
+                chunk_size=1024,
+                cp_isolation=encodings,
+                cp_exclusion=exclude_encodings,
+                preemptive_behaviour=True,
+                explain=False,
+            ).best()
+            if detect_result.chaos < 0.1:
                 break
-        else:
-            is_output_detect_result = True
-            detect_result = detect(data)
-            data = data.decode(detect_result["encoding"])
+            if last_detect_result is None or last_detect_result.chaos > detect_result.chaos:
+                last_detect_result = detect_result
+            exclude_encodings.extend(encodings)
 
         if is_output_detect_result:
-            detect_result["confidence"] = f"{detect_result['confidence']:.2%}"
-            self.console(task_id, self.i18n["procedure_detect_file_encode"].format_map(detect_result), "system")
+            self.console(
+                task_id,
+                self.i18n["procedure_detect_file_encode"].format_map(
+                    {
+                        "confidence": f"{1 - detect_result.chaos:.2%}",
+                        "encoding": detect_result.encoding.replace("_", "-"),
+                    }
+                ),
+                "system",
+            )
 
-        return detect_result["encoding"], data
+        return detect_result.encoding, str(detect_result).replace("\r\n", "\n")
 
     async def get_audio_stream_idx(self, task_id, ffprobe_exe, media_file):
         cmd = [
@@ -874,7 +887,7 @@ class ProcedureManager:
         h, r = divmod(total_ms, 3600000)
         m, r = divmod(r, 60000)
         s, ms = divmod(r, 1000)
-        return f"{h}:{m:02d}:{s:02d},{ms:03d}" if is_srt else f"{h}:{m:02d}:{s:02d}.{ms // 10:02d}"
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}" if is_srt else f"{h}:{m:02d}:{s:02d}.{ms // 10:02d}"
 
     async def shift_subtitle_timeline_delay(
         self, task_id, ffprobe_exe, is_src_media, media_file, audio_idx, subtitle_file
@@ -964,7 +977,7 @@ class ProcedureManager:
                 delay_ms = (delay_ms + 5) // 10 * 10
                 if delay_ms != 0:
                     pattern = re.compile(
-                        r"^( *(?:Dialogue|Comment):.*?,)(\d+:\d{2}:\d{2}\.\d{2}),(\d+:\d{2}:\d{2}\.\d{2})",
+                        r"^ *((?:Dialogue|Comment):.*?,)(\d+:\d{2}:\d{2}\.\d{2}),(\d+:\d{2}:\d{2}\.\d{2})",
                         flags=re.MULTILINE,
                     )
                     content = pattern.sub(
@@ -972,6 +985,7 @@ class ProcedureManager:
                         f"{self._shift_time(m.group(3), delay_ms)}",
                         content,
                     )
+
             return True, content
 
 
@@ -987,6 +1001,7 @@ class TaskManager:
         self.parallel_number = app.parallel_number
         self.stage_variable = app.stage_variable
         self.message_queue = app.message_queue
+        self.subtitle_exts = {f".{x.strip().lower()}" for x in app.general_cfg[f"subtitle_ext"].split(",") if x.strip()}
         self.tasks = None
         self.tasks_gather = None
         self.semaphore = None
@@ -1130,8 +1145,15 @@ class TaskManager:
 
                     output_file = stage.get("output_file", None)
                     if output_file:
-                        with open(output_file, "w", encoding="utf-8-sig", errors="replace") as f:
+                        with open(output_file, "w", encoding="utf-8-sig", newline="") as f:
                             f.write(content)
+                            # ensure the subtitle file ends with a blank line
+                            if (
+                                content
+                                and content[-1] != "\n"
+                                and os.path.splitext(output_file)[1].lower() in self.subtitle_exts
+                            ):
+                                f.write("\n")
 
                     self.update_process()
                     finished_stage_cnt += 1
