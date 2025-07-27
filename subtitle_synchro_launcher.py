@@ -26,9 +26,10 @@ from charset_normalizer import from_bytes
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 
-APP_TITLE = "Subtitle Synchro Launcher"
+__version__ = 1.1
 
-VERSION = 1.0
+
+APP_TITLE = "Subtitle Synchro Launcher"
 
 DEFAULT_CONFIG_CONTENT = """
 [general]
@@ -180,6 +181,7 @@ button_execute = Run
 button_stop = Stop
 context_menu_copy = Copy
 context_menu_select_all = Select All
+context_menu_save = Save As
 filedialog_title_output_dir = Select Output Directory
 messagebox_title_error = Warning
 messagebox_title_exception = Error Occurred
@@ -191,6 +193,7 @@ messagebox_content_same_src_dst_media = The source and destination video/audio p
 messagebox_content_no_input_file = Please set input files!
 messagebox_content_output_dir_is_empty = Please set the output directory!
 messagebox_content_output_dir_is_file = The output directory path is not a directory!
+messagebox_content_file_saving_failed = File saving failed:\t{}
 messagebox_title_rerun = Duplicate Run Prompt
 messagebox_content_rerun = The input files are the same as the last successful run. Run again?
 messagebox_title_expand_src_input = Expand Source Input Entries
@@ -242,6 +245,7 @@ button_execute = 运   行
 button_stop = 停   止
 context_menu_copy = 复制
 context_menu_select_all = 全选
+context_menu_save = 另存为
 filedialog_title_output_dir = 选择输出目录
 messagebox_title_error = 警告
 messagebox_title_exception = 运行出错
@@ -253,6 +257,7 @@ messagebox_content_same_src_dst_media = 第 {} 项的 源视频/音频 跟 目�
 messagebox_content_no_input_file = 请设置输入文件！
 messagebox_content_output_dir_is_empty = 请设置输出目录！
 messagebox_content_output_dir_is_file = 输出目录的路径并非目录！
+messagebox_content_file_saving_failed = 文件保存失败:\t{}
 messagebox_title_rerun = 重复运行提示
 messagebox_content_rerun = 输入文件跟上次成功运行时一样，是否再次运行？
 messagebox_title_expand_src_input = 扩展源输入条目
@@ -1467,7 +1472,7 @@ class Application(TkinterDnD.Tk):
         )
 
     def _create_widgets(self):
-        self.title(f"{APP_TITLE} v{VERSION}  [{self.i18n['title_profile_name']} {self.profile_name}]")
+        self.title(f"{APP_TITLE} v{__version__}  [{self.i18n['title_profile_name']} {self.profile_name}]")
         w, h = (int(x) for x in self.general_cfg["launch_resolution"].split("x"))
         self.geometry(f"{w}x{h}+{(self.winfo_screenwidth() - w) // 2}+{(self.winfo_screenheight() - h) // 2}")
         self.minsize(*self.general_cfg["min_resolution"].split("x"))
@@ -1629,6 +1634,11 @@ class Application(TkinterDnD.Tk):
             font=(self.style_cfg["context_menu_fontname"], self.style_cfg["context_menu_fontsize"]),
             command=self._select_all_text,
         )
+        self.context_menu.add_command(
+            label=self.i18n["context_menu_save"],
+            font=(self.style_cfg["context_menu_fontname"], self.style_cfg["context_menu_fontsize"]),
+            command=self._save_all_text,
+        )
         self.scroll_console.bind("<Button-3>", self._show_context_menu)
 
         # configure the outermost widget last to prevent flickering of inner components
@@ -1684,6 +1694,20 @@ class Application(TkinterDnD.Tk):
         self.scroll_console.focus()
         self.scroll_console.tag_add(tk.SEL, "1.0", tk.END)
         self.scroll_console.see(tk.END)
+
+    def _save_all_text(self):
+        file_path = filedialog.asksaveasfilename(
+            filetypes=[("*", ".*")], initialdir=os.getcwd(), initialfile="runlog.txt"
+        )
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8-sig") as file:
+                    file.write(self.scroll_console.get("1.0", tk.END))
+            except BaseException:
+                messagebox.showerror(
+                    self.i18n["messagebox_title_exception"],
+                    self.i18n["messagebox_content_file_saving_failed"].format(traceback.format_exc()),
+                )
 
     def _execute(self):
         if self.execute_btn.cget("text") == self.i18n["button_execute"]:
@@ -1789,7 +1813,12 @@ class Application(TkinterDnD.Tk):
         return True
 
 
-def main(config_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")):
+def main(config_path=sys.argv[1] if len(sys.argv) > 1 else None):
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")
+        if not os.path.exists(config_path) or not os.path.isfile(config_path):
+            config_path = os.path.join(os.getcwd(), "config.ini")
+
     app = Application(config_path)
     app.mainloop()
 
