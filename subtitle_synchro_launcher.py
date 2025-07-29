@@ -26,7 +26,7 @@ from charset_normalizer import from_bytes
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 
-__version__ = 1.1
+__version__ = 1.2
 
 
 APP_TITLE = "Subtitle Synchro Launcher"
@@ -205,6 +205,8 @@ procedure_stop = Stopped execution: stage {stage_id} ({procedure})
 procedure_detect_file_encode = Detected file encoding: {encoding}, confidence: {confidence}
 procedure_shift_src_subtitle_timeline_delay = Source audio track has a DELAY of {} ms
 procedure_shift_dst_subtitle_timeline_delay = Destination audio track has a DELAY of {} ms
+procedure_get_delay_from_filename = Filename contains delay value: {} ms
+procedure_can_not_get_delay_from_filename = Filename does not contain delay value. Delay set to 0 ms
 """
 
 SIMPLE_CHINESE_I18N_CONTENT = """
@@ -269,6 +271,8 @@ procedure_stop = 终止执行: stage {stage_id} ({procedure})
 procedure_detect_file_encode = 检测到文件的编码为: {encoding}  置信度: {confidence}
 procedure_shift_src_subtitle_timeline_delay = 源音轨带了 {} 毫秒延迟
 procedure_shift_dst_subtitle_timeline_delay = 目标音轨带了 {} 毫秒延迟
+procedure_get_delay_from_filename = 文件名带有延迟值，延迟值为 {} 毫秒
+procedure_can_not_get_delay_from_filename = 文件名不带延迟值，延迟值设置为 0 毫秒
 """
 
 Message = namedtuple("Message", ["task_id", "content", "tag"])
@@ -837,6 +841,8 @@ class ProcedureManager:
             if last_detect_result is None or last_detect_result.chaos > detect_result.chaos:
                 last_detect_result = detect_result
             exclude_encodings.extend(encodings)
+        else:
+            detect_result = last_detect_result
 
         if is_output_detect_result:
             self.console(
@@ -921,31 +927,30 @@ class ProcedureManager:
             audio_idx = int(audio_idx)
             video_start_time = None
             audio_start_time = None
-            is_video = False
             delay_ms = None
             for s in json.loads(self._decode_subprocess_output(content))["streams"]:
-                if s["codec_type"] == "video":
-                    is_video = True
                 if "start_time" in s:
                     if audio_start_time is None and s["codec_type"] == "audio" and s["index"] == audio_idx:
                         audio_start_time = float(s["start_time"])
-                    elif video_start_time is None and is_video:
+                    elif video_start_time is None and s["codec_type"] == "video":
                         video_start_time = float(s["start_time"])
 
             if video_start_time is not None and audio_start_time is not None:
                 delay_ms = int((audio_start_time - video_start_time) * 1000)
-            elif not is_video and audio_start_time is None:
+            elif video_start_time is None:
                 # for audio files, use the DELAY|延迟 in the filename to determine the delay value
                 match = re.search(r"(?:DELAY|延迟) (-?\d+)(?:ms|毫秒)\.[^.]+$", media_file)
                 if match:
                     delay_ms = int(match.group(1))
+                    self.console(task_id, self.i18n["procedure_get_delay_from_filename"].format(delay_ms))
+                else:
+                    delay_ms = 0
+                    self.console(task_id, self.i18n["procedure_can_not_get_delay_from_filename"])
 
             if delay_ms is None:
                 return False, None
 
-            is_success, content = await self.read_file(task_id, subtitle_file)
-            if not is_success:
-                return False, None
+            _, content = await self.read_file(task_id, subtitle_file)
 
             if is_src_media:
                 # The start time of the source subtitle is based on the video's timeline
@@ -1126,9 +1131,10 @@ class TaskManager:
                             task_id, vars_map["ffprobe_exe"], False, *stage["input"]
                         )
                     elif procedure == "convert_file_to_utf8":
-                        is_success, content = await self.procedure_manager.read_file(
+                        _, content = await self.procedure_manager.read_file(
                             task_id, *stage["input"], is_output_detect_result=True
                         )
+                        is_success = True
                     else:
                         raise AttributeError(self.i18n["procedure_undefined_procedure_name"].format(procedure))
 
