@@ -2,6 +2,7 @@
 # coding=utf-8
 
 import asyncio
+import base64
 import configparser
 import hashlib
 import json
@@ -1282,9 +1283,15 @@ class Application(TkinterDnD.Tk):
             return
 
         self._style_setting()
+        self._set_icon()
         self._create_widgets()
         self.scroll_console.insert(tk.END, "𝕊𝕦𝕓𝕥𝕚𝕥𝕝𝕖 𝕊𝕪𝕟𝕔𝕙𝕣𝕠 𝕃𝕒𝕦𝕟𝕔𝕙𝕖𝕣\n", "logo")
         self.scroll_console.insert(tk.END, f"{self.i18n['startup_logo']}", "system")
+
+    def _set_icon(self):
+        b85_str = r"iBL{Q4GJ0x0000DNk~Le0000G0000G2m=5B04OaFQvd(}kWfriMfI2t??*!Qn+@?`GV*aJ@Jc}NSUB{H7x8H=^Lirle;@OO8}L#)^pF(vl@axt4ev=o^_dRzjurG?Gx1A4_J$kqRXG<-O^rY(j!_+vnugP6Qvm<}4b{~K$;uFghDKOeJvuP+Y%ASkDn2YC^n4&49v`xUYu;Z=>R~XUNh|YoCf#c!-Eku9d>^7*AGGbX7ytkO5_D2dQ~dSs_4T9n_VxAk_3!VaqaPptU;DcN004?fL_t&-(^bm{4udch15g(d_AD)Q0EL9G$Ng{D2vO0zFIkqQk2ur-?RQ~}0Ez(qRpG-_2NUjH;ldH?_B?E>aA1q2$v#=z%4im0gG_T>=0#N%d0EdB0b%?cI3utaKVLYrpeMulIE+K0%R!;TNYk`??K)WvcryF<u9wvVy(uUndig`6F9t0W``-p)-v9sr07*qoM6N<$f&"
+        png_data = base64.b85decode(b85_str.encode("ascii"))
+        self.iconphoto(True, tk.PhotoImage(data=png_data))
 
     def _prepare_configure(self, config_file):
         ini_config = configparser.ConfigParser(
