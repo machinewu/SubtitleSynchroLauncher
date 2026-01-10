@@ -17,7 +17,8 @@ import sys
 import threading
 import tkinter as tk
 import traceback
-from collections import OrderedDict, namedtuple
+from abc import ABC, abstractmethod
+from collections import OrderedDict, defaultdict, namedtuple
 from datetime import datetime
 from io import StringIO
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -27,7 +28,7 @@ from charset_normalizer import from_bytes
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 
-__version__ = 1.2
+__version__ = 1.3
 
 
 APP_TITLE = "Subtitle Synchro Launcher"
@@ -41,11 +42,15 @@ min_resolution = 860x360
 tips_trigger_time_ms = 400
 listbox_tips_trigger_time_ms = 600
 top_most = yes
+checkbox_shift_time_skip_comment = yes
+checkbox_shift_time_skip_zero_time = yes
+checkbox_shift_time_fix_negative = yes
+checkbox_clean_fanhuaji = yes
 checkbox_listbox_repeatable = yes
 checkbox_input_file_sorted = yes
 default_output_dir =
 task_parallel_number = 3
-task_stages = 1, 2, 3, 4, 5
+task_stages = 1, 2, 3, 4, 5, 6
 
 [variable]
 ffmpeg_exe = ffmpeg
@@ -53,9 +58,10 @@ ffprobe_exe = ffprobe
 sushi_exe = sushi
 #src_subtitle_utf8 = {temp_dir}/{src_media_name}.stage0.{src_subtitle_suffix}
 src_subtitle_utf8 = {src_subtitle}
-delay_input_subtitle = {temp_dir}/{src_media_name}.stage2.{src_subtitle_suffix}
-sushi_output_subtitle = {temp_dir}/{dst_media_name}.stage4.{src_subtitle_suffix}
-delay_output_subtitle = {output_dir}/{dst_media_name}.shifted.{src_subtitle_suffix}
+stage2_output_subtitle = {temp_dir}/{src_media_name}.stage2.{src_subtitle_suffix}
+stage4_output_subtitle = {temp_dir}/{dst_media_name}.stage4.{src_subtitle_suffix}
+stage5_output_subtitle = {temp_dir}/{dst_media_name}.stage5.{src_subtitle_suffix}
+output_subtitle = {output_dir}/{dst_media_name}.shifted.{src_subtitle_suffix}
 src_audio_idx = 1
 dst_audio_idx = 1
 
@@ -72,7 +78,7 @@ output_key = src_audio_idx
 [stage_2]
 procedure = shift_source_subtitle_timeline_delay
 input = {src_media} {src_audio_idx} {src_subtitle_utf8}
-output_file = {delay_input_subtitle}
+output_file = {stage2_output_subtitle}
 
 [stage_3]
 procedure = get_audio_stream_idx
@@ -81,12 +87,17 @@ output_key = dst_audio_idx
 
 [stage_4]
 procedure = execute_command
-input = {sushi_exe} --max-window 600 --sample-rate 12000 --temp-dir {temp_dir} --src {src_media} --dst {dst_media} --src-audio {src_audio_idx} --dst-audio {dst_audio_idx} --script {delay_input_subtitle} -o {sushi_output_subtitle}
+input = {sushi_exe} --max-window 600 --sample-rate 12000 --temp-dir {temp_dir} --src {src_media} --dst {dst_media} --src-audio {src_audio_idx} --dst-audio {dst_audio_idx} --script {stage2_output_subtitle} -o {stage4_output_subtitle}
 
 [stage_5]
 procedure = shift_destination_subtitle_timeline_delay
-input = {dst_media} {dst_audio_idx} {sushi_output_subtitle}
-output_file = {delay_output_subtitle}
+input = {dst_media} {dst_audio_idx} {stage4_output_subtitle}
+output_file = {stage5_output_subtitle}
+
+[stage_6]
+procedure = fix_subtitle
+input = {src_subtitle_utf8} {stage5_output_subtitle}
+output_file = {output_subtitle}
 
 [style]
 fontname = Microsoft YaHei
@@ -158,8 +169,16 @@ label_source_media = Source Video/Audio
 label_source_subtitle = Source Subtitle
 label_destination_media = Destination Video/Audio
 label_output_dir = Output Directory:
+label_shift_time_skip_comment = Skip comment lines
+label_shift_time_skip_zero_time = Skip zero times
+label_shift_time_fix_negative = Fix negative times
+label_clean_fanhuaji = Clear Fanhuaji
 label_listbox_repeatable = Repeatable
 label_input_file_sorted = Sort
+label_shift_time_skip_comment_tips = Do not shift lines starting with "Comment:" (only applies to .ass subtitles)
+label_shift_time_skip_zero_time_tips = Do not shift lines with both start and end times being 0 (also applies to comment lines in .ass subtitles)
+label_shift_time_fix_negative_tips = If the adjusted time becomes negative, it is set to 0 (also applies to comment lines in .ass subtitles)
+label_clean_fanhuaji_tips = Clean Fanhuaji info lines
 label_listbox_repeatable_tips = Whether duplicate files are allowed in the list box
 label_input_file_sorted_tips = Whether to sort input files before adding to the list box
 label_file_quantity = Total:
@@ -182,7 +201,7 @@ button_execute = Run
 button_stop = Stop
 context_menu_copy = Copy
 context_menu_select_all = Select All
-context_menu_save = Save As
+context_menu_save = Log save As
 filedialog_title_output_dir = Select Output Directory
 messagebox_title_error = Warning
 messagebox_title_exception = Error Occurred
@@ -208,6 +227,7 @@ procedure_shift_src_subtitle_timeline_delay = Source audio track has a DELAY of 
 procedure_shift_dst_subtitle_timeline_delay = Destination audio track has a DELAY of {} ms
 procedure_get_delay_from_filename = Filename contains delay value: {} ms
 procedure_can_not_get_delay_from_filename = Filename does not contain delay value. Delay set to 0 ms
+procedure_shift_line_cannot_found = The following subtitle lines from the source file could not be matched in the shifted subtitles:
 """
 
 SIMPLE_CHINESE_I18N_CONTENT = """
@@ -224,8 +244,16 @@ label_source_media = 源视频/音频
 label_source_subtitle = 源字幕
 label_destination_media = 目标视频/音频
 label_output_dir = 输出目录:
+label_shift_time_skip_comment = 忽略注释行
+label_shift_time_skip_zero_time = 忽略始末时间皆0
+label_shift_time_fix_negative = 负时间置0
+label_clean_fanhuaji = 清理繁化姬
 label_listbox_repeatable = 文件可重复
 label_input_file_sorted = 输入时排序
+label_shift_time_skip_comment_tips = 不对"Comment:"开头的注释行调轴 (此项只对.ass字幕有效)
+label_shift_time_skip_zero_time_tips = 不对开始时间和结束时间都是0的行调轴 (此项对.ass字幕的注释行也有效)
+label_shift_time_fix_negative_tips = 如果调轴后的时间为负数，则置为0 (此项对.ass字幕的注释行也有效)
+label_clean_fanhuaji_tips = 清理繁化姬信息的行
 label_listbox_repeatable_tips = 列表框里能否有可重复文件
 label_input_file_sorted_tips = 是否将输入文件排序后加入列表框
 label_file_quantity = 文件数:
@@ -248,7 +276,7 @@ button_execute = 运   行
 button_stop = 停   止
 context_menu_copy = 复制
 context_menu_select_all = 全选
-context_menu_save = 另存为
+context_menu_save = 日志另存为
 filedialog_title_output_dir = 选择输出目录
 messagebox_title_error = 警告
 messagebox_title_exception = 运行出错
@@ -274,9 +302,293 @@ procedure_shift_src_subtitle_timeline_delay = 源音轨带了 {} 毫秒延迟
 procedure_shift_dst_subtitle_timeline_delay = 目标音轨带了 {} 毫秒延迟
 procedure_get_delay_from_filename = 文件名带有延迟值，延迟值为 {} 毫秒
 procedure_can_not_get_delay_from_filename = 文件名不带延迟值，延迟值设置为 0 毫秒
+procedure_shift_line_cannot_found = 源文件中这些字幕行在调轴后的字幕中找不到匹配的行:
 """
 
 Message = namedtuple("Message", ["task_id", "content", "tag"])
+
+
+def abstractproperty(func=None):
+    """Abstract property tagging decorator"""
+
+    def wrapper(f):
+        f.__is_abstract_property__ = True
+        return f
+
+    if func is None:
+        return wrapper
+    return wrapper(func)
+
+
+class AutoPropertyBase(ABC):
+    """A base class that auto-generates properties for abstract attributes"""
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Automatically generate properties for attributes tagged as abstract
+        for attr_name in dir(cls):
+            attr = getattr(cls, attr_name, None)
+
+            # Check if it is an abstract attribute (implemented via tagging)
+            if hasattr(attr, "__is_abstract_property__"):
+                private_name = f"_{attr_name}"
+                # Create property getter
+                prop = property(lambda self, name=private_name: getattr(self, name, None))
+                # Create property setter
+                prop = prop.setter(lambda self, value, name=private_name: setattr(self, name, value))
+                setattr(cls, attr_name, prop)
+
+
+class SimpleSubtitleLine(AutoPropertyBase):
+    @abstractproperty
+    def index(self):
+        pass
+
+    @abstractproperty
+    def valid(self):
+        pass
+
+    @abstractproperty
+    def other_content(self):
+        pass
+
+    @abstractproperty
+    def start_ms(self):
+        pass
+
+    @abstractproperty
+    def end_ms(self):
+        pass
+
+    @property
+    def duration_ms(self):
+        return self.end_ms - self.start_ms
+
+    @staticmethod
+    @abstractmethod
+    def generate_from_content(subtitle_content):
+        pass
+
+    @abstractmethod
+    def get_match_key(self):
+        pass
+
+    @abstractmethod
+    def is_shifted_match(self, that):
+        pass
+
+    @abstractmethod
+    def rebuild(self, start_ms=None, end_ms=None):
+        pass
+
+
+class SimpleAssLine(SimpleSubtitleLine):
+    def __init__(self, raw_line, index):
+        self.index = index
+        self.valid = False
+
+        raw_line = raw_line.rstrip("\r\n")
+        parts = raw_line.split(",", maxsplit=3)
+        if len(parts) == 4:
+            layer_parts = parts[0].split(":", maxsplit=1)
+            if len(layer_parts) == 2:
+                line_type = layer_parts[0].strip()
+                if line_type in ("Dialogue", "Comment"):
+                    self.valid = True
+                    self.is_comment = line_type == "Comment"
+                    self.layer = layer_parts[1].strip()
+                    self.start_ms = self.time_str_to_ms(parts[1].strip())
+                    self.end_ms = self.time_str_to_ms(parts[2].strip())
+                    self.other_content = parts[3]
+
+        if not self.valid:
+            self.other_content = raw_line
+
+    @staticmethod
+    def generate_from_content(subtitle_content):
+        lines = []
+        index = 0
+        for raw_line in subtitle_content.splitlines():
+            lines.append(SimpleAssLine(raw_line, index))
+            index += 1
+        return lines
+
+    @staticmethod
+    def time_str_to_ms(time_str):
+        try:
+            match = re.match(r"(-?)(\d+):(\d{2}):(\d{2})\.(\d{2})", time_str)
+            if match:
+                sign, h, m, s, cs = match.groups()
+                total_ms = int(h) * 3600000 + int(m) * 60000 + int(s) * 1000 + int(cs) * 10
+                return -total_ms if sign == "-" else total_ms
+        except BaseException:
+            pass
+        return 0
+
+    @staticmethod
+    def ms_to_time_str(ms):
+        sign = ""
+        if ms < 0:
+            sign = "-"
+            ms = -ms
+        h, ms = divmod(ms, 3600000)
+        m, ms = divmod(ms, 60000)
+        s, ms = divmod(ms, 1000)
+        return f"{sign}{h}:{m:02d}:{s:02d}.{ms//10:02d}"
+
+    def get_match_key(self):
+        if self.valid:
+            return (self.duration_ms, self.other_content, self.layer, )
+        return (self.other_content, )
+
+    def is_shifted_match(self, that):
+        if self.valid:
+            return (
+                self.duration_ms == that.duration_ms
+                and self.other_content == that.other_content
+                and self.layer == that.layer
+            )
+        else:
+            return self.other_content == that.other_content
+
+    def rebuild(self, start_ms=None, end_ms=None):
+        if self.valid:
+            start_time_str = self.ms_to_time_str(self.start_ms if start_ms is None else start_ms)
+            end_time_str = self.ms_to_time_str(self.end_ms if end_ms is None else end_ms)
+            line_type = "Comment" if self.is_comment else "Dialogue"
+            return f"{line_type}: {self.layer},{start_time_str},{end_time_str},{self.other_content}"
+        else:
+            return self.other_content
+
+
+class SimpleSrtLine(SimpleSubtitleLine):
+    def __init__(self, raw_block, index):
+        self.index = index
+        self.valid = False
+
+        raw_block = raw_block.rstrip("\r\n")
+        parts = raw_block.split("\n", maxsplit=2)
+        if len(parts) == 3:
+            time_parts = re.split(" --> ", parts[1], maxsplit=1)
+            if len(time_parts) == 2:
+                self.valid = True
+                self.block_num = parts[0].strip()
+                self.start_ms = self.time_str_to_ms(time_parts[0])
+                self.end_ms = self.time_str_to_ms(time_parts[1])
+                self.other_content = parts[2]
+
+        if not self.valid:
+            self.other_content = raw_block
+
+    @staticmethod
+    def generate_from_content(subtitle_content):
+        lines = []
+        index = 0
+        for raw_block in re.split(r"\n\n", subtitle_content):
+            lines.append(SimpleSrtLine(raw_block, index))
+            index = index + 1
+        return lines
+
+    @staticmethod
+    def time_str_to_ms(time_str):
+        try:
+            match = re.match(r"(-?)(\d+):(\d{2}):(\d{2})[,.](\d+)", time_str)
+            if match:
+                sign, h, m, s, ms = match.groups()
+                total_ms = int(h) * 3600000 + int(m) * 60000 + int(s) * 1000 + int(f"{ms}00"[:3])
+                return -total_ms if sign == "-" else total_ms
+        except BaseException:
+            pass
+        return 0
+
+    @staticmethod
+    def ms_to_time_str(ms):
+        sign = ""
+        if ms < 0:
+            sign = "-"
+            ms = -ms
+        h, ms = divmod(ms, 3600000)
+        m, ms = divmod(ms, 60000)
+        s, ms = divmod(ms, 1000)
+        return f"{sign}{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    def get_match_key(self):
+        if self.valid:
+            return (self.duration_ms, self.block_num, self.other_content, )
+        return (self.other_content, )
+
+    def is_shifted_match(self, that):
+        if self.valid:
+            return (
+                self.duration_ms == that.duration_ms
+                and self.block_num == that.block_num
+                and self.other_content == that.other_content
+            )
+        else:
+            return self.other_content == that.other_content
+
+    def rebuild(self, start_ms=None, end_ms=None):
+        if self.valid:
+            start_time_str = self.ms_to_time_str(self.start_ms if start_ms is None else start_ms)
+            end_time_str = self.ms_to_time_str(self.end_ms if end_ms is None else end_ms)
+            return f"{self.block_num}\n{start_time_str} --> {end_time_str}\n{self.other_content}"
+        else:
+            return self.other_content
+
+
+class SubtitleLineMatcher:
+    def __init__(self, src_simple_lines, shifted_simple_lines):
+        self.src_lines = sorted([x for x in src_simple_lines if x.valid], key=lambda x: x.index)
+        self.shifted_lines = sorted([x for x in shifted_simple_lines if x.valid], key=lambda x: x.index)
+
+        self.shifted_lines_hashmap = defaultdict(list)
+        for shifted_line in self.shifted_lines:
+            self.shifted_lines_hashmap[shifted_line.get_match_key()].append(shifted_line)
+
+        self.src_lines_ptr_map = dict((x.index, i) for i, x in enumerate(self.src_lines))
+        self.shifted_lines_ptr_map = dict((x.index, i) for i, x in enumerate(self.shifted_lines))
+
+    def find_match_line(self, src_simple_line):
+        src_line = src_simple_line
+        if not src_line.valid:
+            return None
+
+        # Find all the candidate lines that are exactly the same
+        # except for the start time and end time but with the same time difference
+        candidates = self.shifted_lines_hashmap[src_line.get_match_key()]
+        if not candidates:
+            return None
+
+        # When there is only one candidate line, it can be determined that this line matches
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # For each candidate line, it matches its preceding lines against the source file line by line,
+        # until one is found where all preceding lines match exactly
+        src_ptr = self.src_lines_ptr_map.get(src_line.index)
+        if src_ptr is None:
+            return None
+
+        can_ptrs = list((self.shifted_lines_ptr_map[x.index], i) for i, x in enumerate(candidates))
+        while src_ptr > 0:
+            src_ptr -= 1
+            prev_src_line = self.src_lines[src_ptr]
+            prev_can_ptrs = list()
+            for p, i in can_ptrs:
+                if p > 0 and prev_src_line.is_shifted_match(self.shifted_lines[i - 1]):
+                    prev_can_ptrs.append((p - 1, i))
+
+            if not prev_can_ptrs:
+                break
+            if len(prev_can_ptrs) == 1:
+                return candidates[prev_can_ptrs[0][1]]
+            can_ptrs = prev_can_ptrs
+
+        # After multiple rounds of matching, if there are still multiple candidate lines,
+        # the one with the closest line number is selected
+        candidates = [candidates[i] for _, i in can_ptrs]
+        candidates.sort(key=lambda x: (abs(x.index - src_line.index), 0 if x.index < src_line.index else 1))
+        return candidates[0]
 
 
 class ListModuleFrame(ttk.Frame):
@@ -886,21 +1198,6 @@ class ProcedureManager:
                     return True, str(s["index"])
         return False, None
 
-    @staticmethod
-    def _shift_time(time_str, shift_ms, is_srt=False):
-        h, m, s = time_str.split(":")
-        s, ms = re.split(r"[,.]", s)
-        if not is_srt:
-            ms = f"{ms}0"[:3]
-        total_ms = int(h) * 3600000 + int(m) * 60000 + int(s) * 1000 + int(ms)
-        total_ms += shift_ms
-        if total_ms < 0:
-            total_ms = 0
-        h, r = divmod(total_ms, 3600000)
-        m, r = divmod(r, 60000)
-        s, ms = divmod(r, 1000)
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}" if is_srt else f"{h}:{m:02d}:{s:02d}.{ms // 10:02d}"
-
     async def shift_subtitle_timeline_delay(
         self, task_id, ffprobe_exe, is_src_media, media_file, audio_idx, subtitle_file
     ):
@@ -974,30 +1271,88 @@ class ProcedureManager:
                 self.console(task_id, self.i18n["procedure_shift_dst_subtitle_timeline_delay"].format(delay_ms))
 
             if subtitle_file.lower().endswith(".srt"):
-                if delay_ms != 0 or re.search(r"\d+:\d{2}:\d{2}\.\d{3}", content):
-                    pattern = re.compile(
-                        r"^ *(\d+:\d{2}:\d{2}[,.]\d{3}) --> (\d+:\d{2}:\d{2}[,.]\d{3})", flags=re.MULTILINE
-                    )
-                    content = pattern.sub(
-                        lambda m: f"{self._shift_time(m.group(1), delay_ms, is_srt=True)} --> "
-                        f"{self._shift_time(m.group(2), delay_ms, is_srt=True)}",
-                        content,
-                    )
+                lines = SimpleSrtLine.generate_from_content(content)
+                join_char = "\n\n"
             else:
-                # Non-SRT subtitles do not support millisecond precision, so the delay time is rounded
-                delay_ms = (delay_ms + 5) // 10 * 10
-                if delay_ms != 0:
-                    pattern = re.compile(
-                        r"^ *((?:Dialogue|Comment):.*?,)(\d+:\d{2}:\d{2}\.\d{2}),(\d+:\d{2}:\d{2}\.\d{2})",
-                        flags=re.MULTILINE,
-                    )
-                    content = pattern.sub(
-                        lambda m: f"{m.group(1)}{self._shift_time(m.group(2), delay_ms)},"
-                        f"{self._shift_time(m.group(3), delay_ms)}",
-                        content,
-                    )
+                lines = SimpleAssLine.generate_from_content(content)
+                join_char = "\n"
 
-            return True, content
+            if delay_ms != 0:
+                for line in lines:
+                    if line.valid:
+                        line.start_ms += delay_ms
+                        line.end_ms += delay_ms
+
+            result_content = join_char.join([x.rebuild() for x in lines])
+            return True, result_content
+
+    async def fix_subtitle(self, task_id, fix_setting, src_subtitle_file, shifted_subtitle_file):
+        is_clean_fanhuaji = fix_setting["is_clean_fanhuaji"]
+        is_shift_time_skip_comment = fix_setting["is_shift_time_skip_comment"]
+        is_shift_time_skip_zero_time = fix_setting["is_shift_time_skip_zero_time"]
+        is_shift_time_fix_negative = fix_setting["is_shift_time_fix_negative"]
+
+        _, src_content = await self.read_file(task_id, src_subtitle_file)
+        _, shifted_content = await self.read_file(task_id, shifted_subtitle_file)
+
+        is_srt = src_subtitle_file.lower().endswith(".srt")
+        if is_srt:
+            src_lines = SimpleSrtLine.generate_from_content(src_content)
+            shifted_lines = SimpleSrtLine.generate_from_content(shifted_content)
+            join_char = "\n\n"
+        else:
+            src_lines = SimpleAssLine.generate_from_content(src_content)
+            shifted_lines = SimpleAssLine.generate_from_content(shifted_content)
+            join_char = "\n"
+
+        shift_line_cannot_found_list = []
+        subtitle_line_matcher = SubtitleLineMatcher(src_lines, shifted_lines)
+        if is_shift_time_skip_comment and not is_srt:
+            for src_line in src_lines:
+                if src_line.valid and src_line.is_comment:
+                    shifted_line = subtitle_line_matcher.find_match_line(src_line)
+                    if shifted_line:
+                        shifted_line.start_ms = src_line.start_ms
+                        shifted_line.end_ms = src_line.end_ms
+                    else:
+                        shift_line_cannot_found_list.append(src_line.rebuild())
+
+        if is_shift_time_skip_zero_time:
+            for src_line in src_lines:
+                if src_line.valid and src_line.start_ms == 0 and src_line.end_ms == 0:
+                    shifted_line = subtitle_line_matcher.find_match_line(src_line)
+                    if shifted_line:
+                        shifted_line.start_ms = src_line.start_ms
+                        shifted_line.end_ms = src_line.end_ms
+                    else:
+                        shift_line_cannot_found_list.append(src_line.rebuild())
+
+        if is_shift_time_fix_negative:
+            for shifted_line in shifted_lines:
+                if shifted_line.valid:
+                    if shifted_line.start_ms < 0:
+                        shifted_line.start_ms = 0
+                    if shifted_line.end_ms < 0:
+                        shifted_line.end_ms = 0
+
+        if is_clean_fanhuaji:
+            if is_srt:
+                shifted_lines = [x for x in shifted_lines if not x.other_content.startswith("Processed by 繁化姬")]
+            else:
+                rm_prefix1 = "Comment: Processed by 繁化姬"
+                rm_prefix2 = "Default,,0,0,0,,Processed by 繁化姬"
+                shifted_lines = [
+                    x for x in shifted_lines if not x.other_content.startswith(rm_prefix2 if x.valid else rm_prefix1)
+                ]
+
+        if shift_line_cannot_found_list:
+            msg_list = [self.i18n["procedure_shift_line_cannot_found"]]
+            msg_list.extend(shift_line_cannot_found_list)
+            msg_list.append("")
+            self.console(task_id, msg_list)
+
+        result_content = join_char.join([x.rebuild() for x in shifted_lines])
+        return True, result_content
 
 
 class TaskManager:
@@ -1008,6 +1363,12 @@ class TaskManager:
     def __init__(self, app):
         self.i18n = app.i18n
         self.is_create_temp_dir = app.is_create_temp_dir
+        self.fix_setting = {
+            "is_shift_time_skip_comment": app.is_shift_time_skip_comment.get(),
+            "is_shift_time_skip_zero_time": app.is_shift_time_skip_zero_time.get(),
+            "is_shift_time_fix_negative": app.is_shift_time_fix_negative.get(),
+            "is_clean_fanhuaji": app.is_clean_fanhuaji.get(),
+        }
         self.task_stages = app.task_stages
         self.parallel_number = app.parallel_number
         self.stage_variable = app.stage_variable
@@ -1130,6 +1491,10 @@ class TaskManager:
                     elif procedure == "shift_destination_subtitle_timeline_delay":
                         is_success, content = await self.procedure_manager.shift_subtitle_timeline_delay(
                             task_id, vars_map["ffprobe_exe"], False, *stage["input"]
+                        )
+                    elif procedure == "fix_subtitle":
+                        is_success, content = await self.procedure_manager.fix_subtitle(
+                            task_id, self.fix_setting, *stage["input"]
                         )
                     elif procedure == "convert_file_to_utf8":
                         _, content = await self.procedure_manager.read_file(
@@ -1330,6 +1695,19 @@ class Application(TkinterDnD.Tk):
         self.is_path_sort_var = tk.BooleanVar(
             value=self.general_cfg["checkbox_input_file_sorted"].lower() not in ("no", "false", "n", "0")
         )
+        self.is_shift_time_skip_comment = tk.BooleanVar(
+            value=self.general_cfg["checkbox_shift_time_skip_comment"].lower() not in ("no", "false", "n", "0")
+        )
+        self.is_shift_time_skip_zero_time = tk.BooleanVar(
+            value=self.general_cfg["checkbox_shift_time_skip_zero_time"].lower() not in ("no", "false", "n", "0")
+        )
+        self.is_shift_time_fix_negative = tk.BooleanVar(
+            value=self.general_cfg["checkbox_shift_time_fix_negative"].lower() not in ("no", "false", "n", "0")
+        )
+        self.is_clean_fanhuaji = tk.BooleanVar(
+            value=self.general_cfg["checkbox_clean_fanhuaji"].lower() not in ("no", "false", "n", "0")
+        )
+
         self.current_inputs_hash = None
         self.last_inputs_hash = ""
         self.task_progress = tk.IntVar(value=0)
@@ -1589,6 +1967,46 @@ class Application(TkinterDnD.Tk):
         )
 
         # checkbox
+        skip_comment_checkbox = ttk.Checkbutton(
+            bottom_frame,
+            text=self.i18n["label_shift_time_skip_comment"],
+            variable=self.is_shift_time_skip_comment,
+            onvalue=True,
+            offvalue=False,
+        )
+        skip_comment_checkbox.pack(side=tk.LEFT, padx=(18, 0))
+        TipsBind(skip_comment_checkbox, self.i18n["label_shift_time_skip_comment_tips"])
+
+        skip_zero_time_checkbox = ttk.Checkbutton(
+            bottom_frame,
+            text=self.i18n["label_shift_time_skip_zero_time"],
+            variable=self.is_shift_time_skip_zero_time,
+            onvalue=True,
+            offvalue=False,
+        )
+        skip_zero_time_checkbox.pack(side=tk.LEFT, padx=(8, 0))
+        TipsBind(skip_zero_time_checkbox, self.i18n["label_shift_time_skip_zero_time_tips"])
+
+        fix_negative_checkbox = ttk.Checkbutton(
+            bottom_frame,
+            text=self.i18n["label_shift_time_fix_negative"],
+            variable=self.is_shift_time_fix_negative,
+            onvalue=True,
+            offvalue=False,
+        )
+        fix_negative_checkbox.pack(side=tk.LEFT, padx=(8, 0))
+        TipsBind(fix_negative_checkbox, self.i18n["label_shift_time_fix_negative_tips"])
+
+        clean_fanhuaji_checkbox = ttk.Checkbutton(
+            bottom_frame,
+            text=self.i18n["label_clean_fanhuaji"],
+            variable=self.is_clean_fanhuaji,
+            onvalue=True,
+            offvalue=False,
+        )
+        clean_fanhuaji_checkbox.pack(side=tk.LEFT, padx=(8, 0))
+        TipsBind(clean_fanhuaji_checkbox, self.i18n["label_clean_fanhuaji_tips"])
+
         sorted_checkbox = ttk.Checkbutton(
             bottom_frame,
             text=self.i18n["label_input_file_sorted"],
@@ -1596,8 +2014,9 @@ class Application(TkinterDnD.Tk):
             onvalue=True,
             offvalue=False,
         )
-        sorted_checkbox.pack(side=tk.LEFT, padx=(18, 0))
+        sorted_checkbox.pack(side=tk.LEFT, padx=(8, 0))
         TipsBind(sorted_checkbox, self.i18n["label_input_file_sorted_tips"])
+
         repeatable_checkbox = ttk.Checkbutton(
             bottom_frame,
             text=self.i18n["label_listbox_repeatable"],
