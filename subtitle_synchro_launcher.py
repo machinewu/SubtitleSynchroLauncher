@@ -825,7 +825,7 @@ class ProcedureManager:
             data = await f.read()
 
         exclude_encodings = []
-        detect_result = last_detect_result = None
+        last_detect_result = None
         for encodings in (["utf_8", "gb18030", "big5"], ["utf_16_le", "utf_16_be", "shift_jis", "cp1252"], []):
             # only detect first 10KB
             detect_result = from_bytes(
@@ -1012,7 +1012,7 @@ class TaskManager:
         self.parallel_number = app.parallel_number
         self.stage_variable = app.stage_variable
         self.message_queue = app.message_queue
-        self.subtitle_exts = {f".{x.strip().lower()}" for x in app.general_cfg[f"subtitle_ext"].split(",") if x.strip()}
+        self.subtitle_exts = {f".{x.strip().lower()}" for x in app.general_cfg["subtitle_ext"].split(",") if x.strip()}
         self.tasks = None
         self.tasks_gather = None
         self.semaphore = None
@@ -1051,16 +1051,16 @@ class TaskManager:
         self.tasks_gather = await asyncio.gather(*self.tasks)
 
         stage_cnt = len(self.task_stages)
-        self.console(0, f'\n{"*" * 40}\n   task | stage | target media\n{"-" * 30}')
+        self.console(0, f"\n{'*' * 40}\n   task | stage | target media\n{'-' * 30}")
         for p, finished_stage_cnt in zip(task_paths_list, self.tasks_gather):
             if isinstance(finished_stage_cnt, BaseException):
                 finished_stage_cnt = 0
             self.console(
                 0,
-                f'{"✔" if finished_stage_cnt == stage_cnt else "✖"} {p[0]:^5}|'
+                f"{'✔' if finished_stage_cnt == stage_cnt else '✖'} {p[0]:^5}|"
                 f"{finished_stage_cnt:>3}/{stage_cnt:<3}| {os.path.basename(p[3])}",
             )
-        self.console(0, f'\n{"*" * 40}')
+        self.console(0, f"\n{'*' * 40}")
 
         self.thread = None
         self.tasks = None
@@ -1376,9 +1376,9 @@ class Application(TkinterDnD.Tk):
 
     def _style_setting(self):
         s = ttk.Style()
-        # s.theme_use('clam')
-        # self.tk.call('source', os.path.join(os.path.dirname(__file__), 'azure.tcl'))
-        # self.tk.call('set_theme', 'light')
+        # s.theme_use("clam")
+        # self.tk.call("source", os.path.join(os.path.dirname(__file__), "azure.tcl"))
+        # self.tk.call("set_theme", "light")
         s.configure("TFrame", background=self.style_cfg["color_frame_bg"])
         s.configure("Border.TFrame", borderwidth=1, highlightthickness=0, relief=tk.GROOVE)
 
