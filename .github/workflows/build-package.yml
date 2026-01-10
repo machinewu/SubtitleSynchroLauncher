@@ -1,0 +1,159 @@
+name: Build package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+
+jobs:
+  build-windows:
+    name: Build Windows package
+    runs-on: windows-latest
+    
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+        architecture: 'x64'
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install setuptools opencv-contrib-python-headless
+    
+    - name: Checkout Sushi repository
+      uses: actions/checkout@v6
+      with:
+        repository: machinewu/Sushi
+        path: sushi-repo
+
+    - name: Build Sushi wheel
+      working-directory: sushi-repo
+      run: |
+        pip install -r requirements.txt -r requirements-win.txt
+        python setup.py bdist_wheel
+
+    - name: Install Sushi wheel
+      working-directory: sushi-repo
+      run: |
+        $whlFile = Get-ChildItem -Path dist -Filter *.whl | Select-Object -First 1
+        pip install "$whlFile"
+
+    - name: Checkout project code
+      uses: actions/checkout@v6
+      with:
+        path: main-repo
+
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        $version = "${{ github.ref_type == 'tag' && github.ref_name || '(beta)' }}"
+        echo "version=$version" >> "$env:GITHUB_OUTPUT"
+        echo "compressed_filename_with_sushi=Subtitle Synchro Launcher $version for Win10+ x64 (with sushi).7z" >> "$env:GITHUB_OUTPUT"
+        echo "compressed_filename_without_sushi=Subtitle Synchro Launcher $version for Win10+ x64 (without sushi).7z" >> "$env:GITHUB_OUTPUT"
+
+    - name: Create build directories
+      run: |
+        mkdir build_with_sushi
+        mkdir build_without_sushi
+        mkdir dist
+
+    - name: Install project dependencies
+      working-directory: main-repo
+      run: |
+        pip install -r requirements.txt
+
+    - name: Find sushi module path
+      id: find_sushi
+      run: |
+        $sushiModulePath = python -c "import sushi; import os; print(os.path.dirname(sushi.__file__))"
+        echo "sushi_module_path=$sushiModulePath" >> "$env:GITHUB_OUTPUT"
+  
+    - name: Build sushi executable with Nuitka
+      uses: Nuitka/Nuitka-Action@main
+      with:
+        jobs: 6
+        mode: standalone
+        mingw64: true
+        experimental: force-accept-windows-gcc
+        nofollow-import-to: unittest,pytest
+        enable-plugins: no-qt
+        working-directory: build_with_sushi
+        script-name: ${{ steps.find_sushi.outputs.sushi_module_path }}/__main__.py
+  
+    - name: Build [with sushi version]
+      uses: Nuitka/Nuitka-Action@main
+      with:
+        jobs: 6
+        mode: standalone
+        mingw64: true
+        experimental: force-accept-windows-gcc
+        nofollow-import-to: unittest,pytest
+        enable-plugins: no-qt,tk-inter
+        windows-console-mode: disable
+        include-module: sushi
+        windows-icon-from-ico: ../main-repo/app.ico
+        working-directory: build_with_sushi
+        script-name: ../main-repo/subtitle_synchro_launcher.py
+
+    - name: Compress [with sushi version] to 7z
+      working-directory: build_with_sushi/build
+      run: |
+        Copy-Item "__main__.dist/__main__.exe" "subtitle_synchro_launcher.dist/sushi.exe"
+        Rename-Item "subtitle_synchro_launcher.dist" "subtitle_synchro_launcher"
+        7z a -r -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on "../../dist/${{ steps.get_version.outputs.compressed_filename_with_sushi }}" "subtitle_synchro_launcher"
+
+    - name: Build [without sushi version]
+      uses: Nuitka/Nuitka-Action@main
+      with:
+        nuitka-version: main
+        jobs: 6
+        mode: standalone
+        mingw64: true
+        experimental: force-accept-windows-gcc
+        nofollow-import-to: unittest,pytest
+        enable-plugins: no-qt,tk-inter
+        windows-console-mode: disable
+        windows-icon-from-ico: ../main-repo/app.ico
+        working-directory: build_without_sushi
+        script-name: ../main-repo/subtitle_synchro_launcher.py
+
+    - name: Compress [without sushi version] to 7z
+      working-directory: build_without_sushi/build
+      run: |
+        Rename-Item "subtitle_synchro_launcher.dist" "subtitle_synchro_launcher"
+        7z a -r -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on "../../dist/${{ steps.get_version.outputs.compressed_filename_without_sushi }}" "subtitle_synchro_launcher"
+
+    - name: Upload build artifacts [with sushi version]
+      uses: actions/upload-artifact@v6
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      with:
+        name: Subtitle Synchro Launcher for Win10+ x64 (with sushi)
+        path: dist/${{ steps.get_version.outputs.compressed_filename_with_sushi }}
+        retention-days: 30
+        if-no-files-found: error
+        compression-level: 0
+
+    - name: Upload build artifacts [without sushi version]
+      uses: actions/upload-artifact@v6
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      with:
+        name: Subtitle Synchro Launcher for Win10+ x64 (without sushi)
+        path: dist/${{ steps.get_version.outputs.compressed_filename_without_sushi }}
+        retention-days: 30
+        if-no-files-found: error
+        compression-level: 0
+
+    - name: Upload release asset
+      uses: softprops/action-gh-release@v2
+      if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+      with:
+        files: |
+          dist/${{ steps.get_version.outputs.compressed_filename_with_sushi }}
+          dist/${{ steps.get_version.outputs.compressed_filename_without_sushi }}
+        make_latest: true
+        preserve_order: true
+        generate_release_notes: true
