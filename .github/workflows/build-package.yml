@@ -147,13 +147,40 @@ jobs:
         if-no-files-found: error
         compression-level: 0
 
+    - name: List pip packages version
+      id: list_pip_packages
+      if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+      run: |
+        $pipPackagesForm = pip list
+        echo "pip_packages_form=Build based on the following package versions:\\n<pre>$pipPackagesForm</pre>\\n" >> "$env:GITHUB_OUTPUT"
+
+    - name: Generate Python packages info file
+      id: list_packages
+      if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+      run: |
+        $pythonVersion = python --version
+        $packageList = python -m pip list --format=json | ConvertFrom-Json
+        $table = "### Python Environment Information`n"
+        $table += "**Python Version:** $pythonVersion`n"
+        $table += "**Installed Packages:**`n`n"
+        $table += "| Package | Version |`n"
+        $table += "|---------|---------|`n"
+
+        foreach ($package in $packageList) {
+          $table += "| $($package.name) | $($package.version) |`n"
+        }
+        
+        $table | Out-File -FilePath "dist/python-env-info.md" -Encoding UTF8
+
     - name: Upload release asset
       uses: softprops/action-gh-release@v2
       if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
       with:
+        token: ${{ secrets.WORKFLOW }}
         files: |
           dist/${{ steps.get_version.outputs.compressed_filename_with_sushi }}
           dist/${{ steps.get_version.outputs.compressed_filename_without_sushi }}
         make_latest: true
         preserve_order: true
         generate_release_notes: true
+        body_path: dist/python-env-info.md
